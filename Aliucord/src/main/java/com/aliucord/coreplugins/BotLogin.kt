@@ -28,8 +28,9 @@ import kotlin.jvm.functions.Function0
  * and otherwise defers to the original implementation via [XposedBridge.invokeOriginalMethod].
  */
 internal class BotLogin : CorePlugin(Manifest("BotLogin")) {
-    override val isHidden = true
-
+    // Not hidden: unlike most core plugins this one has a user-facing settingsTab (the intents
+    // picker), and hidden core plugins are filtered out of the Plugins list entirely, which would
+    // make that settings page unreachable. See PluginManager.getVisiblePlugins().
     init {
         manifest.description = "Speaks the Bot Gateway/REST protocol for sessions logged in with a bot token"
         settingsTab = SettingsTab(IntentsSheet::class.java, SettingsTab.Type.BOTTOM_SHEET)
