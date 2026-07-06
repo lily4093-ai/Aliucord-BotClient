@@ -299,6 +299,7 @@ object PluginManager {
         val corePlugins = arrayOf(
             CoreFixes(),
             CoreFeatures(),
+            BotLogin(),
             ButtonsAPI(),
             CommandHandler(),
             CoreCommands(),

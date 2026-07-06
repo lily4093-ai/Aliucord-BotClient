@@ -8,9 +8,11 @@ package com.aliucord.coreplugins;
 
 import android.content.Context;
 import android.view.View;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
+import com.aliucord.BotSession;
 import com.aliucord.Utils;
 import com.aliucord.entities.CorePlugin;
 import com.aliucord.patcher.Patcher;
@@ -53,25 +55,32 @@ public final class TokenLogin extends CorePlugin {
             v.removeViewAt(2); // remove use a password manager
 
             TextInputLayout input = (TextInputLayout) v.getChildAt(1);
+            MaterialButton button = (MaterialButton) v.getChildAt(2);
+
+            CheckBox botCheckbox = new CheckBox(view.getContext());
+            botCheckbox.setText("Login as bot");
+            // Inserted after the token input and before the login button, which are looked up above by index.
+            v.addView(botCheckbox, 2);
+
             if (input != null) {
                 input.setHint("Token");
                 ViewExtensions.setOnImeActionDone(input, false, e -> {
-                    if (!e.getText().equals("")) login(e.getText());
+                    if (!e.getText().equals("")) login(e.getText(), botCheckbox.isChecked());
                     return Unit.a;
                 });
             }
 
-            MaterialButton button = (MaterialButton) v.getChildAt(2);
             if (button != null) {
                 button.setOnClickListener(e -> {
                     if (input == null || input.getEditText() == null) return;
                     CharSequence token = input.getEditText().getText();
-                    if (!token.equals("")) login(token);
+                    if (!token.equals("")) login(token, botCheckbox.isChecked());
                 });
             }
         }
 
-        public void login(CharSequence token) {
+        public void login(CharSequence token, boolean isBot) {
+            BotSession.INSTANCE.setBot(isBot);
             StoreAuthentication.access$dispatchLogin(StoreStream.getAuthentication(), new ModelLoginResult(token.toString().startsWith("mfa."), null, token.toString().trim(), null, new ArrayList<>()));
         }
     }
