@@ -17,8 +17,12 @@ import com.discord.models.user.MeUser
 import com.discord.utilities.rest.RestAPI
 import com.discord.views.CheckedSetting
 import com.google.gson.Gson
+import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import kotlin.jvm.functions.Function0
+
+private fun XC_MethodHook.MethodHookParam.callOriginal(): Any? =
+    XposedBridge.invokeOriginalMethod(method, thisObject, args)
 
 /**
  * Makes bot-token sessions (see [TokenLogin]) speak the Bot Gateway/REST protocol instead of the
@@ -49,7 +53,7 @@ internal class BotLogin : CorePlugin(Manifest("BotLogin")) {
         // Every REST request (Aliucord's own helpers and Discord's real RequiredHeadersInterceptor)
         // reads the Authorization header value from here.
         patcher.instead<RestAPI.AppHeadersProvider>("getAuthToken") { param ->
-            val token = XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args) as String?
+            val token = param.callOriginal() as String?
             if (BotSession.isBot && token != null) "Bot $token" else token
         }
     }
@@ -64,34 +68,29 @@ internal class BotLogin : CorePlugin(Manifest("BotLogin")) {
 
     private fun patchGatewayIdentify() {
         patcher.instead<GatewaySocket>("doIdentify") { param ->
-            if (!BotSession.isBot) {
-                return@instead XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args)
-            }
-
-            val socket = param.thisObject as GatewaySocket
+            if (!BotSession.isBot) return@instead param.callOriginal()
 
             @Suppress("UNCHECKED_CAST")
-            val identifyDataProvider = ReflectUtils.getField(socket, "identifyDataProvider") as Function0<GatewaySocket.IdentifyData?>
-            val identifyData = identifyDataProvider.invoke()
-                ?: return@instead XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args)
+            val identifyDataProvider = ReflectUtils.getField(this, "identifyDataProvider") as Function0<GatewaySocket.IdentifyData?>
+            val identifyData = identifyDataProvider.invoke() ?: return@instead param.callOriginal()
 
             @Suppress("UNCHECKED_CAST")
-            val properties = ReflectUtils.getField(socket, "identifyProperties") as Map<String, Any?>
+            val properties = ReflectUtils.getField(this, "identifyProperties") as Map<String, Any?>
             val token = identifyData.token
 
             // Mirror the bookkeeping the original doIdentify() does so heartbeat/resume logic
             // downstream still sees consistent state.
-            ReflectUtils.setField(socket, "seq", 0)
-            ReflectUtils.setField(socket, "sessionId", null)
-            ReflectUtils.setField(socket, "connectionState", 3) // GatewaySocket.IDENTIFYING
-            ReflectUtils.setField(socket, "identifyStartTime", System.currentTimeMillis())
-            ReflectUtils.setField(socket, "token", token)
+            ReflectUtils.setField(this, "seq", 0)
+            ReflectUtils.setField(this, "sessionId", null)
+            ReflectUtils.setField(this, "connectionState", 3) // GatewaySocket.IDENTIFYING
+            ReflectUtils.setField(this, "identifyStartTime", System.currentTimeMillis())
+            ReflectUtils.setField(this, "token", token)
 
             val outgoing = Outgoing(Opcode.IDENTIFY, BotIdentifyPayload(token, properties, BotSession.intents))
             val send = GatewaySocket::class.java.getDeclaredMethod(
                 "send", Outgoing::class.java, Boolean::class.javaPrimitiveType, Gson::class.java
             ).apply { isAccessible = true }
-            send.invoke(socket, outgoing, false, Gson())
+            send.invoke(this, outgoing, false, Gson())
         }
     }
 
@@ -102,8 +101,7 @@ internal class BotLogin : CorePlugin(Manifest("BotLogin")) {
     // it would just loop forever. Reporting hasBirthday=true for bot sessions skips the gate.
     private fun patchAgeGate() {
         patcher.instead<MeUser>("getHasBirthday") { param ->
-            if (BotSession.isBot) true
-            else XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args)
+            if (BotSession.isBot) true else param.callOriginal()
         }
     }
 
