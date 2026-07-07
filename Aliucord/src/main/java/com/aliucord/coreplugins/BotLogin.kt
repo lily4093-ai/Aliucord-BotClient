@@ -13,6 +13,7 @@ import com.aliucord.widgets.BottomSheet
 import com.discord.gateway.GatewaySocket
 import com.discord.gateway.io.Outgoing
 import com.discord.gateway.opcodes.Opcode
+import com.discord.models.user.MeUser
 import com.discord.utilities.rest.RestAPI
 import com.discord.views.CheckedSetting
 import com.google.gson.Gson
@@ -39,6 +40,7 @@ internal class BotLogin : CorePlugin(Manifest("BotLogin")) {
     override fun start(context: Context) {
         patchAuthHeader()
         patchGatewayIdentify()
+        patchAgeGate()
     }
 
     override fun stop(context: Context) = patcher.unpatchAll()
@@ -90,6 +92,18 @@ internal class BotLogin : CorePlugin(Manifest("BotLogin")) {
                 "send", Outgoing::class.java, Boolean::class.javaPrimitiveType, Gson::class.java
             ).apply { isAccessible = true }
             send.invoke(socket, outgoing, false, Gson())
+        }
+    }
+
+    // Bot accounts never go through the normal registration birthday flow, so MeUser.hasBirthday
+    // is permanently false for them. StoreAuthentication.getShouldShowAgeGate() gates on exactly
+    // that flag (for accounts created after 2021-02-05) to decide whether to show the
+    // "help make Discord safer" age-verification screen, which a bot session can never satisfy -
+    // it would just loop forever. Reporting hasBirthday=true for bot sessions skips the gate.
+    private fun patchAgeGate() {
+        patcher.instead<MeUser>("getHasBirthday") { param ->
+            if (BotSession.isBot) true
+            else XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args)
         }
     }
 
