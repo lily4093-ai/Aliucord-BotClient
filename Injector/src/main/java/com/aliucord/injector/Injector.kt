@@ -74,7 +74,7 @@ internal fun init(appCtx: Application) {
             externalCustomCoreFile.copyTo(internalCustomCoreFile, overwrite = true)
         }
         // Download new stable core
-        else if (!internalCoreFile.exists()) {
+        else if (!internalCoreFile.exists() && !tryLoadBundledCore(appCtx, internalCoreFile)) {
             val es = Executors.newSingleThreadExecutor()
             val result = es.submit(Callable {
                 installCore(
@@ -157,6 +157,27 @@ private fun startLegacyAliucord() {
                 init.invoke(null, param.thisObject as AppActivity)
             }
         })
+}
+
+/**
+ * If a core bundle was packaged into this APK's assets at patch time (`assets/Aliucord.zip`),
+ * copies it to [internalCoreFile] and returns true, avoiding a network download on first launch.
+ * Returns false if no bundled core asset is present, so normal Manager-produced installs
+ * (which never bundle this asset) fall back to downloading the core as before.
+ */
+private fun tryLoadBundledCore(appCtx: Application, internalCoreFile: File): Boolean {
+    return try {
+        appCtx.assets.open("Aliucord.zip").use { input ->
+            internalCoreFile.outputStream().use { output -> input.copyTo(output) }
+        }
+        Logger.d("Loaded bundled Aliucord core from APK assets")
+        true
+    } catch (e: java.io.FileNotFoundException) {
+        false
+    } catch (e: Throwable) {
+        Logger.e("Failed to load bundled Aliucord core from assets", e)
+        false
+    }
 }
 
 /**
