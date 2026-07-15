@@ -13,6 +13,7 @@ import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
 import com.aliucord.BotSession;
+import com.aliucord.Http;
 import com.aliucord.Utils;
 import com.aliucord.entities.CorePlugin;
 import com.aliucord.patcher.Patcher;
@@ -25,11 +26,13 @@ import com.discord.models.domain.auth.ModelLoginResult;
 import com.discord.stores.StoreAuthentication;
 import com.discord.stores.StoreStream;
 import com.discord.utilities.view.extensions.ViewExtensions;
+import com.discord.views.LoadingButton;
 import com.discord.widgets.auth.WidgetAuthLanding;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.textfield.TextInputLayout;
 import com.lytefast.flexinput.R;
 
+import java.io.IOException;
 import java.util.*;
 
 import kotlin.Unit;
@@ -41,6 +44,8 @@ public final class TokenLogin extends CorePlugin {
     }
 
     public static class Page extends AppFragment {
+        private LoadingButton loginButton;
+
         public Page() {
             super(Utils.getResId("widget_auth_login", "layout"));
         }
@@ -50,6 +55,8 @@ public final class TokenLogin extends CorePlugin {
             super.onViewBound(view);
 
             LinearLayout v = view.findViewById(Utils.getResId("auth_login_container", "id"));
+            if (v == null) return; // prevent crash if layout change
+
             v.removeViewAt(1); // remove email input
             v.removeViewAt(2); // remove forgot password
             v.removeViewAt(2); // remove use a password manager
@@ -65,23 +72,63 @@ public final class TokenLogin extends CorePlugin {
             if (input != null) {
                 input.setHint("Token");
                 ViewExtensions.setOnImeActionDone(input, false, e -> {
-                    if (!e.getText().equals("")) login(e.getText(), botCheckbox.isChecked());
+                    login(e.getText(), botCheckbox.isChecked());
                     return Unit.a;
                 });
             }
 
             if (button != null) {
-                button.setOnClickListener(e -> {
-                    if (input == null || input.getEditText() == null) return;
-                    CharSequence token = input.getEditText().getText();
-                    if (!token.equals("")) login(token, botCheckbox.isChecked());
+                loginButton = new LoadingButton(view.getContext(), null);
+                loginButton.setIsLoading(false);
+                loginButton.setText(button.getText());
+                int i = v.indexOfChild(button);
+                v.removeViewAt(i);
+                v.addView(loginButton, i, button.getLayoutParams());
+                loginButton.setOnClickListener(e -> {
+                    if (input != null && input.getEditText() != null) login(input.getEditText().getText(), botCheckbox.isChecked());
                 });
             }
         }
 
         public void login(CharSequence token, boolean isBot) {
-            BotSession.INSTANCE.setBot(isBot);
-            StoreAuthentication.access$dispatchLogin(StoreStream.getAuthentication(), new ModelLoginResult(token.toString().startsWith("mfa."), null, token.toString().trim(), null, new ArrayList<>()));
+            String trimmedToken = token.toString().trim();
+            if (trimmedToken.isEmpty()) {
+                Utils.showToast("Token cannot be empty");
+                return;
+            }
+            setLoading(true);
+            Utils.threadPool.execute(() -> {
+                try (Http.Request req = Http.Request.newDiscordRNRequest("/users/@me")
+                        .setHeader("Authorization", isBot ? "Bot " + trimmedToken : trimmedToken)
+                        .setRequestTimeout(10000)) {
+                    req.execute().assertOk();
+                    BotSession.INSTANCE.setBot(isBot);
+                    StoreAuthentication.access$dispatchLogin(
+                        StoreStream.getAuthentication(),
+                        new ModelLoginResult(trimmedToken.startsWith("mfa."), null, trimmedToken, null, new ArrayList<>())
+                    );
+                } catch (Http.HttpException e) {
+                    Utils.showToast("Invalid token: " + e.statusCode + ": " + e.statusMessage);
+                } catch (IOException e) {
+                    Utils.showToast("Failed to verify token: " + e.getMessage());
+                } finally {
+                    setLoading(false);
+                }
+            });
+        }
+
+        private void setLoading(boolean state) {
+            if (loginButton == null) return;
+
+            if (state) {
+                loginButton.setIsLoading(true);
+                loginButton.setEnabled(false);
+            } else {
+                Utils.mainThread.post(() -> {
+                    loginButton.setIsLoading(false);
+                    loginButton.setEnabled(true);
+                });
+            }
         }
     }
 
